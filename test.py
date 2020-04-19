@@ -29,14 +29,22 @@ c = 1
 batch_size = 32
 epochs = 50
 tournament_len = 3
+time_limit = 300 #ms
 
 env_state = gym.make('gym_go:go-v0', size=GRID, reward_method='real')
 
-
-MctsD = MCTS(PolicyNet(GRID, 5, GRID**2+1, reg=0.1), 300, GRID)
-MctsT = MCTS(PolicyNet(GRID, 5, GRID**2+1, reg=0.1), 300, GRID)
+load_model_path=''
+save_model_path=''
+if load_model_path == '':
+    MctsD = MCTS(PolicyNet(GRID, 5, GRID**2+1, reg=0.01), time_limit, GRID)
+    MctsT = MCTS(PolicyNet(GRID, 5, GRID**2+1, reg=0.01), time_limit, GRID)
+else :
+    mod = tf.keras.models.load_model(load_model_path)
+    MctsD = MCTS(mod, time_limit, GRID)
+    MctsT = MCTS(mod, time_limit, GRID)
 
 optimizer = tf.optimizers.Adam(lr)
+All_losses = []
 while True:
     HIST = []
     for game_ix in range(nb_data_gather_games):
@@ -47,7 +55,6 @@ while True:
             t0 = time.time()
             pie, actions = MctsD.search(env_state, temperature, c)
             #print(f"MCTS search took {time.time()-t0} seconds")
-            #print(f"pie is {pie}, actions are {actions} for t={t}")
             HIST.append((to_numpy(state), pie, actions, env_state.turn()))
             action = np.random.choice(actions, p=pie)
             state, _, _, _ = env_state.step(action)
@@ -55,17 +62,16 @@ while True:
                 break
             t += 1
         z = 0 if env_state.get_winning()==1 else 1
-    #HIST = [[board.flatten(), [ind], pie.flatten(), [int(z==turn_id)]] for (board, ind), pie, turn_id in HIST]
-    #print(f"HIST shape is {HIST.shape}")
+
     print(f"Starting training")
 
     boardDat = tf.data.Dataset.from_generator(lambda: iter([board.flatten() for (board, _), _, _, _ in HIST]), tf.float32)
     indDat = tf.data.Dataset.from_generator(lambda: iter([[ind] for (_, ind), _, _, _ in HIST]), tf.float32)
-    #print(f"pie shape {pie.shape}")
+    
     PL = []
     for _, pie, actions, _ in HIST:
         pl = np.zeros(GRID*GRID+1)
-        #print(actions)
+        
         for idd, ix in enumerate(actions.flatten()):
             if ix is None:
                 pl[-1] = pie[idd]
@@ -79,42 +85,44 @@ while True:
     print(dataset)
     dataset = dataset.batch(batch_size, drop_remainder=True)
     iterator = list(dataset.as_numpy_iterator())
-    #print(len(iterator))
+    
     for epoch in range(epochs):
         #print(f"Training epoch {epoch+1}")
         losses = []
         for batch in iterator:
-            #x, y = batch
-            #print(f"batch is {batch}")
+            # Inputs: board as a numpy array and passing indicator (ind)
+            # Labels: Target probability distribution (pie) and winning indicator (z)
+            board, ind, pie, z = batch 
             
-            board, ind, pie, z = batch # Inputs: board as a numpy array and passing indicator (ind)
-            #print(f"new : {batch_size*GRID*GRID}, old : {board.shape}")
             board = tf.reshape(board, (batch_size, GRID, GRID, 1))
             ind = tf.reshape(ind, (batch_size, 1))
-            # Labels: Target probability distribution (pie) and winning indicator (z)
-            #print(f"shapes are board {board.shape}, ind {ind.shape}, pie {pie.shape}, z {z.shape}")
+
             with tf.GradientTape() as tape:
-                #print(f"board shape {board.shape}, ind shape {ind.shape}")
+                
                 p, v = MctsT.guidingNet(board, ind, training=True)
-                #print(f"pie shape {pie.shape}, p shape {p.shape},  v shape {v.shape}, z shape {z.shape}")
+                
                 MSE = tf.losses.MSE(z,v)
                 CE = tf.losses.categorical_crossentropy(pie, p)
-                loss = MSE+CE# compute the loss
+                RL = 0 # Regularization loss
                 for lo in MctsT.guidingNet.losses: # Adding the regularization terms for each layer
-                    loss+=lo
-                losses.append(loss)
-                variables = MctsT.guidingNet.trainable_variables # get the trainable variables
-                gradients = tape.gradient(loss, variables) # compute the gradients of the loss wrt those variables
+                    RL+=lo
+                loss = MSE+CE+RL
+                losses.append((MSE.numpy(), CE.numpy(), [RL.numpy() for _ in CE.numpy()]))
+                variables = MctsT.guidingNet.trainable_variables # Get the trainable variables
+                gradients = tape.gradient(loss, variables) # Compute the gradients of the loss wrt those variables
 
-            optimizer.apply_gradients(zip(gradients, variables)) # update the trainable weights
-        print(f"Mean loss on epoch {epoch+1} is {np.mean(losses)}")
-    print(f"starting tournament")
+            optimizer.apply_gradients(zip(gradients, variables)) # Update the trainable weights
+        print(f"Mean MSE, CE and RL losses on epoch {epoch+1} are {np.mean(np.mean(losses, axis=2), axis=0)}")
+        
+        All_losses.append(np.mean(losses, axis=2))
+    
+    print(f"Starting tournament")
     t_score = 0
     for i in range(tournament_len):
         print(f"Tournament game {i}")
         # Tournamnet to see would wins in a MCTS battle between the training net and the data generation net
         env_state.reset()
-        A = ['t', 'd'] if i%2 else ['d', 't'] # to alternate who starts
+        A = ['t', 'd'] if i%2 else ['d', 't'] # To alternate who starts
         D = {'t' : MctsT,  'd' : MctsD}
         t=0
         while t<max_time_step : # and avg_v > min_val:
@@ -146,4 +154,4 @@ while True:
     # Here t_score represent the game_won-game_lost for the training network 
     if t_score>0 : 
         # If the training net won more games that means it's better so we use it for the next MCTS data gathering
-        MctsD.guidingNet = copy.copy(MctsT.guidingNet)
+        MctsD.guidingNet = tf.keras.models.clone_model(MctsT.guidingNet)
