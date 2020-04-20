@@ -29,15 +29,15 @@ c = 1
 batch_size = 32
 epochs = 50
 tournament_len = 3
-time_limit = 300 #ms
+time_limit = 150 #ms
 
 env_state = gym.make('gym_go:go-v0', size=GRID, reward_method='real')
 
 load_model_path=''
-save_model_path=''
+save_model_path='mod_1'
 if load_model_path == '':
-    MctsD = MCTS(PolicyNet(GRID, 5, GRID**2+1, reg=0.01), time_limit, GRID)
-    MctsT = MCTS(PolicyNet(GRID, 5, GRID**2+1, reg=0.01), time_limit, GRID)
+    MctsD = MCTS(PolicyNet(GRID, 5, GRID**2+1, reg=0.001), time_limit, GRID)
+    MctsT = MCTS(PolicyNet(GRID, 5, GRID**2+1, reg=0.001), time_limit, GRID)
 else :
     mod = tf.keras.models.load_model(load_model_path)
     MctsD = MCTS(mod, time_limit, GRID)
@@ -45,7 +45,7 @@ else :
 
 optimizer = tf.optimizers.Adam(lr)
 All_losses = []
-while True:
+for loop in range(10):
     HIST = []
     for game_ix in range(nb_data_gather_games):
         print(f"self-play game {game_ix+1}")
@@ -154,4 +154,5 @@ while True:
     # Here t_score represent the game_won-game_lost for the training network 
     if t_score>0 : 
         # If the training net won more games that means it's better so we use it for the next MCTS data gathering
-        MctsD.guidingNet = tf.keras.models.clone_model(MctsT.guidingNet)
+        MctsD.guidingNet = copy.copy(MctsT.guidingNet)
+MctsT.guidingNet.save_weights(save_model_path)

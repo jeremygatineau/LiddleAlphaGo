@@ -60,10 +60,12 @@ class PolicyNet(tf.keras.Model):
             tf.keras.layers.Conv2D(2, 3, (1, 1), kernel_regularizer=regularizers.l2(reg)),
             tf.keras.layers.BatchNormalization(),
             tf.keras.layers.ReLU(),
+            tf.keras.layers.Conv2D(2, 3, (1, 1), kernel_regularizer=regularizers.l2(reg)),
+            tf.keras.layers.ReLU(),
             tf.keras.layers.Flatten(),
-            tf.keras.layers.Dense(boardSize**2+1, activation='softmax', kernel_regularizer=regularizers.l2(reg))
+            tf.keras.layers.Dense(boardSize**2, activation='softmax', kernel_regularizer=regularizers.l2(reg))
         ])
-
+        self.pieHead0 = tf.keras.layers.Dense(boardSize**2+1, activation='softmax', kernel_regularizer=regularizers.l2(reg))
         # Value head
         self.vHead = tf.keras.Sequential([
             tf.keras.layers.Conv2D(1, 1, (1, 1), kernel_regularizer=regularizers.l2(reg)),
@@ -88,6 +90,8 @@ class PolicyNet(tf.keras.Model):
         z = self.dance(z, training=training) 
         z = tf.reshape(z, board_tensor.shape)
         pie = self.pieHead(z, training=training)
+        l = tf.keras.layers.concatenate([pie, y], axis=1) 
+        pie = self.pieHead0(l, training=training)
         v = self.vHead(z, training=training)
         #print(f"call pie shape {pie.shape}")
         return pie, v
