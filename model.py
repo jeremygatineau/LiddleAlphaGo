@@ -62,6 +62,7 @@ class PolicyNet(tf.keras.Model):
             tf.keras.layers.ReLU(),
             tf.keras.layers.Conv2D(2, 3, (1, 1), kernel_regularizer=regularizers.l2(reg)),
             tf.keras.layers.ReLU(),
+            tf.keras.layers.BatchNormalization(),
             tf.keras.layers.Flatten(),
             tf.keras.layers.Dense(boardSize**2, activation='softmax', kernel_regularizer=regularizers.l2(reg))
         ])

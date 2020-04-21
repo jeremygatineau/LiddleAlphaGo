@@ -82,12 +82,16 @@ class MCTS():
             node = parent
 
     def sample(self, node, c):
-        pa = np.array([node.children[action]['p'] for action in node.children.keys()]) # Probability distribution for getting to each child node
-        qa = np.array([node.children[action]['q'] for action in node.children.keys()])
-        na = np.array([node.children[action]['n'] for action in node.children.keys()])
+        pa = np.array([node.children[action]['p'] for action in node.children.keys()]).flatten() # Probability distribution for getting to each child node
+        qa = np.array([node.children[action]['q'] for action in node.children.keys()]).flatten()
+        na = np.array([node.children[action]['n'] for action in node.children.keys()]).flatten()
         s = np.sum(na)
+        
         tm = qa+c*pa*np.sqrt(s)/(1+na)
+        
+        
         best_action_ix = np.argmax(tm)
+        
         best_action = list(node.children.keys())[best_action_ix]
         return node.children[best_action]['node'], best_action
     
